@@ -1,6 +1,6 @@
 # realhax-desktop
 
-![realhax wallpaper](docs/wallpaper.png)
+![realhax wallpaper](assets/wallpaper.png)
 
 One script that turns a Linux machine into the **realhax Linux** desktop: dark XFCE, neon red ring wallpaper, top panel, bottom dock, conky "System" / "Lab Info" widgets, alacritty + fish, and a fastfetch card.
 
@@ -43,7 +43,7 @@ Primary target: Ubuntu 24.04. The script also has package maps for Debian/Ubuntu
 | fastfetch | pinned 2.40.4 static build if missing; `neofetch` maps to it |
 | GTK + xfwm4 theme | Orchis `2025-04-25` (sha256-pinned), red, black tweak, installed as **RealHax-Dark** |
 | Icons | **RealHax** theme: inherits Papirus-Dark, adds red folders, red home, realhax logo, terminal icon |
-| Wallpaper | built from SVG embedded in the script, rendered to 3840×2160 |
+| Wallpaper | `assets/wallpaper.png` (sha256-pinned), set on every monitor |
 | Panel | top bar: logo + "Applications" menu, tray, notifications, volume, `Mon Oct 26  21:39` clock, power |
 | Desktop | Home, Terminal, Tools, Recon, Reports, Trash |
 | Dock | plank, RealHax theme: Terminal, Files, Firefox, VS Code, Editor, Wireshark, app grid |
@@ -53,14 +53,13 @@ Primary target: Ubuntu 24.04. The script also has package maps for Debian/Ubuntu
 ## Determinism
 
 - Every download is pinned to a version and checked against a sha256. A mismatch aborts the install.
-- The wallpaper's mountain geometry is generated once with a fixed seed (`tools/gen_wallpaper.py`) and embedded as static SVG, so it isn't randomized per machine.
 - XFCE settings are written straight to the xfconf XML files, so the first login always looks the same.
 - At each XFCE login, `realhax-session-init` points the wallpaper at whatever monitor names that machine has.
 - Re-running is safe. Originals are backed up once, the first time a file is replaced, under `~/.local/share/realhax/backup`, and listed in `manifest.txt`.
 
 ## Rebuilding
 
-`install.sh` is generated. Edit `tools/install.sh.in` or `tools/gen_wallpaper.py`, then run `tools/build.sh`.
+`install.sh` is generated. Edit `tools/install.sh.in`, then run `tools/build.sh`. If you replace `assets/wallpaper.png`, update `WALLPAPER_SHA256` to match.
 
 ## Known gaps vs. the mockup
 
