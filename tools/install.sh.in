@@ -546,63 +546,267 @@ plank_apply() { dconf write /net/launchpad/plank/enabled-docks "['dock1']" && dc
 plank_apply 2>/dev/null || warn "dconf unavailable now; dock settings will apply at first XFCE login"
 
 # --------------------------------------------------------------------------- 10. conky widgets
-put "$C/conky/realhax-system.conf" <<'EOF'
--- realhax: System widget
-local function sh(c) local p = io.popen(c); local r = p:read("*l"); p:close(); return r end
-local IF = sh("ip route show default 2>/dev/null | awk '{for(i=1;i<NF;i++) if($i==\"dev\"){print $(i+1); exit}}'") or "eth0"
-conky.config = {
-  alignment = 'top_right', gap_x = 18, gap_y = 58,
-  minimum_width = 236, maximum_width = 236,
-  own_window = true, own_window_type = 'desktop', own_window_class = 'Conky',
-  own_window_hints = 'undecorated,below,sticky,skip_taskbar,skip_pager',
-  own_window_argb_visual = true, own_window_argb_value = 215,
-  own_window_transparent = false, own_window_colour = '0e0f13',
-  border_inner_margin = 16, double_buffer = true, update_interval = 1.5,
-  use_xft = true, font = 'Inter:size=9', draw_shades = false, draw_outline = false,
-  draw_borders = false, draw_graph_borders = false,
-  default_color = 'e6e8ec', color0 = 'ff2340', color1 = 'e6e8ec', color2 = '9aa0aa', color3 = '2a2c33',
-}
-conky.text = [[
-${font JetBrainsMono Nerd Font:size=10}@@F192@@${font Inter:bold:size=10}  System${font}
-${voffset 8}${font Inter:bold:size=10}CPU${alignr}${cpu cpu0}%${font}
-${color0}${cpugraph cpu0 24,236 ff2340 ff2340 -t}${color}
-${voffset 4}${font Inter:bold:size=10}Memory${alignr}${font Inter:size=9}${mem} / ${memmax} (${memperc}%)${font}
-${color0}${membar 7,236}${color}
-${voffset 4}${font Inter:bold:size=10}Disk${alignr}${fs_used_perc /}%${font}
-${color0}${fs_bar 7,140 /}${color}${alignr}${fs_free /} free
-${voffset 4}${font Inter:bold:size=10}Network${font}
-${color0}${font JetBrainsMono Nerd Font:size=9}@@F063@@${font}${color} ${downspeed ]] .. IF .. [[}/s${alignr}${color0}${font JetBrainsMono Nerd Font:size=9}@@F062@@${font}${color} ${upspeed ]] .. IF .. [[}/s
-${color0}${downspeedgraph ]] .. IF .. [[ 22,236 ff2340 ff2340 -t}${color}
-]]
-EOF
+# One conky instance draws both cards ("System" + "Lab Info") with Lua/Cairo in a
+# single 250px window, so they're laid out deterministically and never overlap.
+# "Open Lab Guide" is handled by conky's lua_mouse_hook and runs xdg-open on
+# $REALHAX_LAB_GUIDE_URL (default https://realhax.io), baked in at install time.
+LAB_GUIDE_URL=${REALHAX_LAB_GUIDE_URL:-https://realhax.io}
+LAB_GUIDE_URL=${LAB_GUIDE_URL//[$'\r\n']/}; LAB_GUIDE_URL=${LAB_GUIDE_URL//]==]/}
+{ printf -- '-- realhax: "System" + "Lab Info" cards, drawn with Cairo by one conky instance.\n'
+  printf 'LAB_GUIDE_URL = [==[%s]==]\n' "$LAB_GUIDE_URL"
+  cat <<'EOF'
+require 'cairo'
+pcall(require, 'cairo_xlib')
 
-put "$C/conky/realhax-labinfo.conf" <<'EOF'
--- realhax: Lab Info widget. "Attacker (connected)" turns green when a lab VPN (tun0) is up.
-local function sh(c) local p = io.popen(c); local r = p:read("*l"); p:close(); return r end
-local IF = sh("ip route show default 2>/dev/null | awk '{for(i=1;i<NF;i++) if($i==\"dev\"){print $(i+1); exit}}'") or "eth0"
-local OS = sh(". /etc/os-release 2>/dev/null; echo \"$NAME ($(hostname))\"") or "Linux"
-conky.config = {
-  alignment = 'top_right', gap_x = 18, gap_y = 418,
-  minimum_width = 236, maximum_width = 236,
-  own_window = true, own_window_type = 'desktop', own_window_class = 'Conky',
-  own_window_hints = 'undecorated,below,sticky,skip_taskbar,skip_pager',
-  own_window_argb_visual = true, own_window_argb_value = 215,
-  own_window_transparent = false, own_window_colour = '0e0f13',
-  border_inner_margin = 16, double_buffer = true, update_interval = 3,
-  use_xft = true, font = 'Inter:size=9', draw_shades = false, draw_outline = false,
-  draw_borders = false, default_color = 'e6e8ec', color0 = 'ff2340', color2 = '9aa0aa', color4 = '22c55e',
-}
-conky.text = [[
-${font JetBrainsMono Nerd Font:size=10}@@F192@@${font Inter:bold:size=10}  Lab Info${font}
-${voffset 10}${if_up tun0}${color4}●${color}  Attacker ${color4}(connected)${color}${else}${color2}●${color}  Attacker ${color2}(offline)${color}${endif}
-${voffset 8}IP Address${alignr}${if_up tun0}${addr tun0}${else}${addr ]] .. IF .. [[}${endif}
-OS${alignr}]] .. OS .. [[
+local W, PAD = 250, 14           -- window width, inner card padding
+local SYS_Y, SYS_H = 0, 290      -- System card
+local LAB_Y, LAB_H = 302, 206    -- Lab Info card (12px gap below System)
+local BTN = { x = PAD, y = LAB_Y + 160, w = W - 2 * PAD, h = 32 }
+local N = 60                     -- samples of history
 
-Uptime${alignr}${uptime_short}
-${voffset 8}${color2}${hr 1}${color}
-${alignc}${font JetBrainsMono Nerd Font:size=10}@@F02D@@${font}  Open Lab Guide
-]]
+local C = {
+  card = { 0x0e / 255, 0x0f / 255, 0x13 / 255, 0.86 },
+  border = { 1, 1, 1, 0.09 }, sep = { 1, 1, 1, 0.07 },
+  fg = { 0.902, 0.910, 0.925, 1 }, dim = { 0.604, 0.627, 0.667, 1 },
+  track = { 0.165, 0.173, 0.200, 1 }, red = { 1, 0.137, 0.251, 1 },
+  green = { 0.133, 0.773, 0.369, 1 }, grey = { 0.42, 0.44, 0.48, 1 },
+}
+local TEXT, ICON = 'Inter', 'JetBrainsMono Nerd Font'
+
+local hist = { cpu = {}, down = {}, up = {} }
+for _, t in pairs(hist) do for i = 1, N do t[i] = 0 end end  -- graphs span the full width from the start
+local iface, iface_t, hover = nil, -1, false
+
+local function sh(c) local p = io.popen(c); if not p then return nil end
+  local r = p:read('*l'); p:close(); return r end
+
+local function default_iface()
+  local now = os.time()
+  if not iface or now - iface_t > 30 then
+    iface = sh("ip route show default 2>/dev/null | awk '{for(i=1;i<NF;i++) if($i==\"dev\"){print $(i+1); exit}}'")
+    if not iface or iface == '' then iface = 'lo' end
+    iface_t = now
+  end
+  return iface
+end
+
+local OS = sh(". /etc/os-release 2>/dev/null; echo \"${NAME:-Linux} ($(hostname))\"") or 'Linux'
+
+local function push(t, v) t[#t + 1] = v; if #t > N then table.remove(t, 1) end end
+local function num(s) return tonumber(s) or 0 end
+local function unit(s) return (s or ''):gsub('^%s+', ''):gsub('(%d)(%a)', '%1 %2') end
+
+local function rgba(cr, c, a) cairo_set_source_rgba(cr, c[1], c[2], c[3], a or c[4]) end
+
+local function rrect(cr, x, y, w, h, r)
+  cairo_new_sub_path(cr)
+  cairo_arc(cr, x + w - r, y + r, r, -math.pi / 2, 0)
+  cairo_arc(cr, x + w - r, y + h - r, r, 0, math.pi / 2)
+  cairo_arc(cr, x + r, y + h - r, r, math.pi / 2, math.pi)
+  cairo_arc(cr, x + r, y + r, r, math.pi, 3 * math.pi / 2)
+  cairo_close_path(cr)
+end
+
+local function font(cr, face, size, bold)
+  cairo_select_font_face(cr, face, CAIRO_FONT_SLANT_NORMAL,
+    bold and CAIRO_FONT_WEIGHT_BOLD or CAIRO_FONT_WEIGHT_NORMAL)
+  cairo_set_font_size(cr, size)
+end
+
+local function text_w(cr, s)
+  local ext = cairo_text_extents_t:create(); cairo_text_extents(cr, s, ext)
+  local w = ext.x_advance; if ext.destroy then ext:destroy() end; return w
+end
+
+-- align: 'l' (x = left edge), 'r' (x = right edge), 'c' (x = centre)
+local function text(cr, s, x, y, c, face, size, bold, align)
+  font(cr, face, size, bold); rgba(cr, c)
+  if align == 'r' then x = x - text_w(cr, s) elseif align == 'c' then x = x - text_w(cr, s) / 2 end
+  cairo_move_to(cr, x, y); cairo_show_text(cr, s)
+  return x
+end
+
+local function card(cr, y, h, title)
+  rrect(cr, 0.5, y + 0.5, W - 1, h - 1, 8)
+  rgba(cr, C.card); cairo_fill_preserve(cr)
+  rgba(cr, C.border); cairo_set_line_width(cr, 1); cairo_stroke(cr)
+  -- ring icon + title
+  cairo_set_line_width(cr, 1.5); rgba(cr, C.fg)
+  cairo_arc(cr, PAD + 6, y + 21, 5.5, 0, 2 * math.pi); cairo_stroke(cr)
+  cairo_arc(cr, PAD + 6, y + 21, 2.2, 0, 2 * math.pi); cairo_fill(cr)
+  text(cr, title, PAD + 19, y + 25.5, C.fg, TEXT, 13, true)
+  rgba(cr, C.sep); cairo_rectangle(cr, PAD, y + 40, W - 2 * PAD, 1); cairo_fill(cr)
+end
+
+local function bar(cr, x, y, w, h, pct)
+  rrect(cr, x, y, w, h, h / 2); rgba(cr, C.track); cairo_fill(cr)
+  pct = math.max(0, math.min(100, pct))
+  if pct > 0 then
+    rrect(cr, x, y, math.max(h, w * pct / 100), h, h / 2); rgba(cr, C.red); cairo_fill(cr)
+  end
+end
+
+-- history graph: red line over a soft red fill, scaled to max(floor, peak)
+local function graph(cr, t, x, y, w, h, floor, c, filled)
+  local peak = floor
+  for _, v in ipairs(t) do if v > peak then peak = v end end
+  local n = #t; if n < 2 then return end
+  local dx = w / (N - 1)
+  local x0 = x + w - (n - 1) * dx
+  cairo_new_path(cr)
+  for i, v in ipairs(t) do
+    local px, py = x0 + (i - 1) * dx, y + h - (v / peak) * (h - 2) - 1
+    if i == 1 then cairo_move_to(cr, px, py) else cairo_line_to(cr, px, py) end
+  end
+  if filled then
+    local path = cairo_copy_path(cr)
+    cairo_line_to(cr, x + w, y + h); cairo_line_to(cr, x0, y + h); cairo_close_path(cr)
+    local g = cairo_pattern_create_linear(0, y, 0, y + h)
+    cairo_pattern_add_color_stop_rgba(g, 0, c[1], c[2], c[3], 0.35)
+    cairo_pattern_add_color_stop_rgba(g, 1, c[1], c[2], c[3], 0.02)
+    cairo_set_source(cr, g); cairo_fill(cr); cairo_pattern_destroy(g)
+    cairo_new_path(cr); cairo_append_path(cr, path); cairo_path_destroy(path)
+  end
+  rgba(cr, c); cairo_set_line_width(cr, 1.4)
+  cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND); cairo_stroke(cr)
+end
+
+local function mem()
+  local t, a = 0, 0
+  local f = io.open('/proc/meminfo')
+  if f then
+    for l in f:lines() do
+      local k, v = l:match('^(%w+):%s+(%d+)')
+      if k == 'MemTotal' then t = tonumber(v) elseif k == 'MemAvailable' then a = tonumber(v) end
+    end
+    f:close()
+  end
+  local used = (t - a) / 1048576
+  return used, t / 1048576, t > 0 and math.floor((t - a) * 100 / t + 0.5) or 0
+end
+
+local function system_card(cr, ifc)
+  local y, R = SYS_Y, W - PAD
+  card(cr, y, SYS_H, 'System')
+  -- CPU
+  local cpu = num(conky_parse('${cpu cpu0}'))
+  text(cr, 'CPU', PAD, y + 66, C.fg, TEXT, 12.5, true)
+  text(cr, cpu .. '%', R, y + 66, C.fg, TEXT, 12.5, true, 'r')
+  graph(cr, hist.cpu, PAD, y + 74, W - 2 * PAD, 26, 20, C.red, true)
+  bar(cr, PAD, y + 103, W - 2 * PAD, 3, cpu)
+  -- Memory
+  local used, total, mp = mem()
+  text(cr, 'Memory', PAD, y + 132, C.fg, TEXT, 12.5, true)
+  text(cr, string.format('%.1f / %.1f GiB (%d%%)', used, total, mp), R, y + 132, C.fg, TEXT, 11.5, false, 'r')
+  bar(cr, PAD, y + 141, W - 2 * PAD, 6, mp)
+  -- Disk
+  local dp = num(conky_parse('${fs_used_perc /}'))
+  text(cr, 'Disk', PAD, y + 176, C.fg, TEXT, 12.5, true)
+  text(cr, dp .. '%', R, y + 176, C.fg, TEXT, 12.5, true, 'r')
+  bar(cr, PAD, y + 186, 128, 6, dp)
+  text(cr, unit(conky_parse('${fs_free /}')) .. ' free', R, y + 193, C.fg, TEXT, 11.5, false, 'r')
+  -- Network
+  text(cr, 'Network', PAD, y + 222, C.fg, TEXT, 12.5, true)
+  local dn = unit(conky_parse('${downspeed ' .. ifc .. '}')) .. '/s'
+  local up = unit(conky_parse('${upspeed ' .. ifc .. '}')) .. '/s'
+  text(cr, '@@F063@@', PAD, y + 245, C.red, ICON, 12)
+  text(cr, dn, PAD + 15, y + 245, C.fg, TEXT, 11.5)
+  local ux = text(cr, up, R, y + 245, C.fg, TEXT, 11.5, false, 'r')
+  text(cr, '@@F062@@', ux - 5, y + 245, C.red, ICON, 12, false, 'r')
+  local gy, gh = y + 253, 26
+  rgba(cr, C.track); cairo_rectangle(cr, PAD, gy + gh, W - 2 * PAD, 1); cairo_fill(cr)
+  local floor = 4
+  for _, v in ipairs(hist.up) do if v > floor then floor = v end end
+  graph(cr, hist.up, PAD, gy, W - 2 * PAD, gh, floor, { 1, 0.55, 0.62, 0.55 }, false)
+  graph(cr, hist.down, PAD, gy, W - 2 * PAD, gh, floor, C.red, true)
+end
+
+local function lab_card(cr, ifc)
+  local y, R = LAB_Y, W - PAD
+  card(cr, y, LAB_H, 'Lab Info')
+  local up = conky_parse('${if_up tun0}1${else}0${endif}') == '1'
+  rgba(cr, up and C.green or C.grey)
+  cairo_arc(cr, PAD + 6, y + 63, 4.5, 0, 2 * math.pi); cairo_fill(cr)
+  local x = text(cr, 'Attacker ', PAD + 19, y + 67, C.fg, TEXT, 12)
+  x = x + text_w(cr, 'Attacker ')
+  text(cr, up and '(connected)' or '(offline)', x, y + 67, up and C.green or C.dim, TEXT, 12)
+  local ip = up and conky_parse('${addr tun0}') or conky_parse('${addr ' .. ifc .. '}')
+  if ip == '' or ip == 'No Address' then ip = '—' end
+  local rows = { { 'IP Address', ip }, { 'OS', OS }, { 'Uptime', conky_parse('${uptime_short}') } }
+  for i, r in ipairs(rows) do
+    local ry = y + 76 + i * 22
+    text(cr, r[1], PAD, ry, C.fg, TEXT, 11.5)
+    text(cr, r[2], R, ry, C.fg, TEXT, 11.5, false, 'r')
+  end
+  -- "Open Lab Guide" button
+  rrect(cr, BTN.x + 0.5, BTN.y + 0.5, BTN.w - 1, BTN.h - 1, 6)
+  rgba(cr, { 1, 1, 1, hover and 0.07 or 0.02 }); cairo_fill_preserve(cr)
+  rgba(cr, hover and { 1, 0.137, 0.251, 0.8 } or { 1, 1, 1, 0.16 }); cairo_set_line_width(cr, 1); cairo_stroke(cr)
+  font(cr, TEXT, 12, false)
+  local label, icon = 'Open Lab Guide', '@@F02D@@'
+  local lw = text_w(cr, label)
+  font(cr, ICON, 13, false)
+  local iw = text_w(cr, icon)
+  local sx = BTN.x + (BTN.w - (iw + 8 + lw)) / 2
+  text(cr, icon, sx, BTN.y + 21, C.fg, ICON, 13)
+  text(cr, label, sx + iw + 8, BTN.y + 21, C.fg, TEXT, 12)
+end
+
+function conky_main()
+  if conky_window == nil then return end
+  local ifc = default_iface()
+  if tonumber(conky_parse('${updates}')) > 1 then
+    push(hist.cpu, num(conky_parse('${cpu cpu0}')))
+    push(hist.down, num(conky_parse('${downspeedf ' .. ifc .. '}')))
+    push(hist.up, num(conky_parse('${upspeedf ' .. ifc .. '}')))
+  end
+  local cs = cairo_xlib_surface_create(conky_window.display, conky_window.drawable,
+    conky_window.visual, conky_window.width, conky_window.height)
+  local cr = cairo_create(cs)
+  cairo_set_antialias(cr, CAIRO_ANTIALIAS_BEST)
+  system_card(cr, ifc)
+  lab_card(cr, ifc)
+  cairo_destroy(cr); cairo_surface_destroy(cs)
+end
+
+local function in_btn(x, y) return x >= BTN.x and x <= BTN.x + BTN.w and y >= BTN.y and y <= BTN.y + BTN.h end
+
+function conky_mouse(ev)
+  if ev.type == 'mouse_move' or ev.type == 'mouse_leave' then
+    hover = ev.type == 'mouse_move' and in_btn(ev.x, ev.y)
+    return false
+  end
+  if ev.type == 'button_down' and (ev.button == 'left' or ev.button == 1) and in_btn(ev.x, ev.y) then
+    os.execute("xdg-open '" .. LAB_GUIDE_URL:gsub("'", "'\\''") .. "' >/dev/null 2>&1 &")
+    return true
+  end
+  return false
+end
 EOF
+} | put "$C/conky/realhax-widgets.lua"
+
+# Window type 'normal' (+ undecorated/below/sticky/skip_* hints): conky 1.19 makes
+# 'desktop' windows click-through, so they never see the button press. Note the
+# hook must be given as 'conky_mouse' — 1.19.6 does not add the conky_ prefix.
+put "$C/conky/realhax-system.conf" <<EOF
+-- realhax: "System" + "Lab Info" cards (drawn by realhax-widgets.lua)
+conky.config = {
+  alignment = 'top_right', gap_x = 16, gap_y = 54,
+  minimum_width = 250, maximum_width = 250, minimum_height = 508,
+  own_window = true, own_window_type = 'normal', own_window_class = 'Conky',
+  own_window_title = 'realhax-widgets',
+  own_window_hints = 'undecorated,below,sticky,skip_taskbar,skip_pager',
+  own_window_argb_visual = true, own_window_argb_value = 0, own_window_transparent = true,
+  border_inner_margin = 0, border_outer_margin = 0, double_buffer = true,
+  update_interval = 1, cpu_avg_samples = 2, net_avg_samples = 2,
+  draw_shades = false, draw_outline = false, draw_borders = false,
+  use_xft = true, font = 'Inter:size=1',
+  lua_load = '$C/conky/realhax-widgets.lua', lua_draw_hook_pre = 'main', lua_mouse_hook = 'conky_mouse',
+}
+conky.text = [[]]
+EOF
+# older releases ran a second conky for Lab Info
+rm -f "$C/conky/realhax-labinfo.conf" "$C/autostart/realhax-conky1.desktop" "$C/autostart/realhax-conky2.desktop"
 
 # --------------------------------------------------------------------------- 11. session init + autostart (XFCE only)
 put "$HOME/.local/bin/realhax-session-init" <<EOF
@@ -639,8 +843,7 @@ EOF
 }
 autostart init   "$HOME/.local/bin/realhax-session-init"
 autostart plank  "sh -c 'sleep 2; exec plank'"
-autostart conky1 "sh -c 'sleep 4; exec conky -q -c $C/conky/realhax-system.conf'"
-autostart conky2 "sh -c 'sleep 4; exec conky -q -c $C/conky/realhax-labinfo.conf'"
+autostart conky  "sh -c 'sleep 4; exec conky -q -c $C/conky/realhax-system.conf'"
 
 # --------------------------------------------------------------------------- 12. alacritty
 put "$C/alacritty/alacritty.toml" <<EOF
