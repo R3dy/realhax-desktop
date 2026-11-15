@@ -4,7 +4,7 @@
 #
 #  XFCE 4.18 + Orchis(red, black) GTK/xfwm4 theme renamed "RealHax-Dark",
 #  "RealHax" icon theme (Papirus-Dark + red folders), neon ring wallpaper,
-#  top panel (whisker "Applications" menu, tray, clock, power), plank dock,
+#  top panel (whisker "Applications" menu, tray, clock, power), floating dock,
 #  conky "System" + "Lab Info" widgets, alacritty + fish/starship prompt,
 #  fastfetch/neofetch branding.
 #
@@ -121,25 +121,25 @@ for p in apt-get dnf pacman zypper; do command -v $p >/dev/null && { pm=$p; brea
 pkgs_for() {
   case "$pm" in
     apt-get) echo "xfce4 xfce4-whiskermenu-plugin xfce4-pulseaudio-plugin xfce4-notifyd xfce4-appfinder
-      thunar mousepad plank conky-all papirus-icon-theme fonts-inter fonts-dejavu-core alacritty fish
+      thunar mousepad conky-all papirus-icon-theme fonts-inter fonts-dejavu-core alacritty fish
       librsvg2-bin sassc gtk2-engines-murrine curl git xz-utils x11-xserver-utils dconf-cli iproute2
       libglib2.0-bin xdg-user-dirs network-manager-gnome" ;;
     dnf) echo "xfce4-session xfwm4 xfdesktop xfce4-panel xfce4-settings xfconf Thunar mousepad xfce4-appfinder
-      xfce4-whiskermenu-plugin xfce4-pulseaudio-plugin xfce4-notifyd plank conky papirus-icon-theme
+      xfce4-whiskermenu-plugin xfce4-pulseaudio-plugin xfce4-notifyd conky papirus-icon-theme
       rsms-inter-fonts dejavu-sans-mono-fonts alacritty fish librsvg2-tools sassc gtk-murrine-engine curl git xz
       xrandr dconf iproute glib2 xdg-user-dirs network-manager-applet" ;;
-    pacman) echo "xfce4 xfce4-whiskermenu-plugin xfce4-pulseaudio-plugin xfce4-notifyd plank conky
+    pacman) echo "xfce4 xfce4-whiskermenu-plugin xfce4-pulseaudio-plugin xfce4-notifyd conky
       papirus-icon-theme inter-font ttf-dejavu alacritty fish librsvg sassc gtk-engine-murrine curl git xz
       xorg-xrandr dconf iproute2 glib2 xdg-user-dirs network-manager-applet" ;;
-    zypper) echo "patterns-xfce-xfce xfce4-whiskermenu-plugin xfce4-pulseaudio-plugin xfce4-notifyd plank conky
+    zypper) echo "patterns-xfce-xfce xfce4-whiskermenu-plugin xfce4-pulseaudio-plugin xfce4-notifyd conky
       papirus-icon-theme google-inter-fonts dejavu-fonts alacritty fish rsvg-convert sassc gtk2-engine-murrine
       curl git xz xrandr dconf iproute2 glib2-tools xdg-user-dirs NetworkManager-applet" ;;
   esac
 }
 app_pkgs_for() {
   case "$pm" in
-    apt-get) echo "wireshark code" ;; dnf) echo "wireshark code" ;;
-    pacman) echo "wireshark-qt code" ;; zypper) echo "wireshark-ui-qt code" ;;
+    apt-get) echo "wireshark code keepassxc" ;; dnf) echo "wireshark code keepassxc" ;;
+    pacman) echo "wireshark-qt code keepassxc" ;; zypper) echo "wireshark-ui-qt code keepassxc" ;;
   esac
 }
 pkg_available() {
@@ -578,41 +578,37 @@ for f in "$ICONS_DIR"/icons.screen*.rc "$ICONS_DIR/icons.screen.latest.rc"; do
   put "$f" < "$TMP/icons.rc"
 done
 
-# --------------------------------------------------------------------------- 9. plank dock
-put "$D/plank/themes/RealHax/dock.theme" <<'EOF'
-[PlankTheme]
-TopRoundness=10
-BottomRoundness=10
-LineWidth=1
-OuterStrokeColor=255;;255;;255;;22
-FillStartColor=14;;15;;19;;232
-FillEndColor=10;;11;;14;;232
-InnerStrokeColor=255;;255;;255;;8
+# --------------------------------------------------------------------------- 9. dock (floating xfce4-panel)
+# The dock is a second xfce4-panel ("panel-2"), not plank: plank 0.11 always
+# draws its background flush against the screen edge (Top/BottomPadding only
+# pad icons inside it, in tenths of IconSize), so it cannot float. A panel with
+# snap position 0 is placed by its centre point, so it can float DOCK_GAP px
+# above the bottom edge; realhax-session-init re-centres it on every login.
+# Its window is fully transparent; the rounded box is drawn by the launchers'
+# buttons, one slice each (#launcher-<id> is per-plugin, so the top panel is
+# untouched) via ~/.config/gtk-3.0/realhax-dock.css. The terminal keeps the
+# mockup's red "active" box. Launchers have no running-window state, so there
+# are no duplicate/transient items.
+DOCK_PANEL=2; DOCK_SIZE=76; DOCK_ICON=44; DOCK_GAP=20; DOCK_FIRST_ID=101
+dock_pos() { # p=0;x=<centre>;y=<centre> for the primary (else first) monitor
+  xrandr --listmonitors 2>/dev/null | awk -v gap=$DOCK_GAP -v sz=$DOCK_SIZE '
+    NR > 1 && (!f || $2 ~ /\*/) { split($3, a, /[\/x+]/); x = a[5] + int(a[1] / 2)
+      y = a[6] + a[3] - gap - int(sz / 2); f = 1; if ($2 ~ /\*/) exit }
+    END { if (f) printf "p=0;x=%d;y=%d\n", x, y }'
+}
 
-[PlankDockTheme]
-HorizPadding=12
-TopPadding=10
-BottomPadding=10
-ItemPadding=16
-IndicatorSize=3
-IconShadowSize=0
-UrgentBounceHeight=1.6666666666666667
-LaunchBounceHeight=0.625
-FadeOpacity=1
-ClickTime=300
-UrgentBounceTime=600
-LaunchBounceTime=600
-ActiveTime=300
-SlideTime=300
-FadeTime=250
-HideTime=150
-GlowSize=30
-GlowTime=10000
-GlowPulseTime=2000
-UrgentHueShift=150
-ItemMoveTime=450
-CascadeHide=true
-EOF
+# dock-only icons (RealHax icon theme from section 5)
+DOCK_TERM_SVG='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><path d="M14,20 L28,32 L14,44" fill="none" stroke="#f2f3f5" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/><path d="M33,46 H51" stroke="#f2f3f5" stroke-width="5" stroke-linecap="round"/></svg>'
+DOCK_GRID_SVG='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="#8b919c"><circle cx="17" cy="17" r="5.5"/><circle cx="32" cy="17" r="5.5"/><circle cx="47" cy="17" r="5.5"/><circle cx="17" cy="32" r="5.5"/><circle cx="32" cy="32" r="5.5"/><circle cx="47" cy="32" r="5.5"/><circle cx="17" cy="47" r="5.5"/><circle cx="32" cy="47" r="5.5"/><circle cx="47" cy="47" r="5.5"/></svg>'
+DOCK_FIN_SVG='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><linearGradient id="w" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4aa8ff"/><stop offset="1" stop-color="#1665d8"/></linearGradient></defs><path d="M8,52 C20,40 30,22 50,8 C44,24 44,38 54,52 Z" fill="url(#w)"/><rect x="4" y="51" width="56" height="5" rx="2.5" fill="#1665d8"/></svg>'
+DOCK_SHIELD_SVG='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><path d="M32,4 L56,12 V30 C56,45 46,55 32,60 C18,55 8,45 8,30 V12 Z" fill="#f4f6fa"/><path d="M32,9 L51,15.5 V30 C51,42 43,50.5 32,54.5 C21,50.5 13,42 13,30 V15.5 Z" fill="#1f6fe0"/><circle cx="32" cy="27" r="6.5" fill="#f4f6fa"/><path d="M28.5,31 h7 l2,13 h-11 Z" fill="#f4f6fa"/></svg>'
+mkdir -p "$IT/scalable/apps"
+printf '%s\n' "$DOCK_TERM_SVG"   > "$IT/scalable/apps/realhax-dock-terminal.svg"
+printf '%s\n' "$FOLDER_SVG"      > "$IT/scalable/apps/realhax-dock-files.svg"
+printf '%s\n' "$DOCK_GRID_SVG"   > "$IT/scalable/apps/realhax-dock-apps.svg"
+printf '%s\n' "$DOCK_FIN_SVG"    > "$IT/scalable/apps/realhax-dock-wireshark.svg"
+printf '%s\n' "$DOCK_SHIELD_SVG" > "$IT/scalable/apps/realhax-dock-security.svg"
+gtk-update-icon-cache -q -f -t "$IT" 2>/dev/null || true
 
 find_desktop() { # first existing .desktop among candidates
   local dirs=("$D/applications" /usr/share/applications /usr/local/share/applications
@@ -620,35 +616,101 @@ find_desktop() { # first existing .desktop among candidates
               "$D/flatpak/exports/share/applications")
   for n in "$@"; do for d in "${dirs[@]}"; do [[ -f "$d/$n" ]] && { echo "$d/$n"; return; }; done; done
 }
-L="$C/plank/dock1/launchers"; track "$L"; rm -rf "$L"; mkdir -p "$L"
-items=()
-add_item() { # name candidates...
-  local name=$1; shift; local f; f=$(find_desktop "$@") || true
+dock_ids=(); dock_plugins=""; dock_id=$DOCK_FIRST_ID
+dock_item() { # dock_item <name> <icon|-> <candidate.desktop>...  (skipped if the app isn't installed)
+  local name=$1 icon=$2; shift 2; local f; f=$(find_desktop "$@") || true
   [[ -z $f ]] && return 0
-  printf '[PlankDockItemPreferences]\nLauncher=file://%s\n' "$f" > "$L/$name.dockitem"; items+=("'$name.dockitem'")
+  local dir="$C/xfce4/panel/launcher-$dock_id"
+  if [[ $icon == - ]]; then put "$dir/$name.desktop" < "$f"
+  else sed "s|^Icon=.*|Icon=$icon|" "$f" | put "$dir/$name.desktop"; fi
+  dock_plugins+="    <property name=\"plugin-$dock_id\" type=\"string\" value=\"launcher\">
+      <property name=\"items\" type=\"array\"><value type=\"string\" value=\"$name.desktop\"/></property>
+    </property>
+"
+  dock_ids+=("$dock_id"); dock_id=$((dock_id + 1))
 }
-add_item terminal  realhax-terminal.desktop
-add_item files     thunar.desktop org.xfce.thunar.desktop Thunar.desktop
-add_item firefox   firefox.desktop firefox_firefox.desktop firefox-esr.desktop org.mozilla.firefox.desktop
-add_item code      code.desktop code_code.desktop com.visualstudio.code.desktop code-oss.desktop
-add_item editor    org.xfce.mousepad.desktop mousepad.desktop
-add_item wireshark org.wireshark.Wireshark.desktop wireshark.desktop
-add_item apps      xfce4-appfinder.desktop org.xfce.appfinder.desktop
-put "$RH/plank.dconf" <<EOF
-[/]
-theme='RealHax'
-position='bottom'
-alignment='center'
-icon-size=42
-zoom-enabled=false
-hide-mode='none'
-show-dock-item=false
-lock-items=false
-pressure-reveal=false
-dock-items=[$(IFS=,; echo "${items[*]}")]
+dock_item terminal  realhax-dock-terminal   realhax-terminal.desktop
+dock_item files     realhax-dock-files      thunar.desktop org.xfce.thunar.desktop Thunar.desktop
+dock_item firefox   firefox                 firefox.desktop firefox_firefox.desktop firefox-esr.desktop org.mozilla.firefox.desktop
+dock_item code      vscode                  code.desktop com.microsoft.VSCode.desktop code_code.desktop com.visualstudio.code.desktop code-oss.desktop
+dock_item editor    accessories-text-editor org.xfce.mousepad.desktop mousepad.desktop
+# the mockup's "M" shield slot: first installed security tool, drawn as a generic shield
+dock_item security  realhax-dock-security   burpsuite.desktop kali-burpsuite.desktop zaproxy.desktop org.zaproxy.ZAP.desktop \
+                                            org.keepassxc.KeePassXC.desktop keepassxc.desktop
+dock_item wireshark realhax-dock-wireshark  org.wireshark.Wireshark.desktop wireshark.desktop
+if command -v xfce4-popup-whiskermenu >/dev/null; then dock_apps_exec="xfce4-popup-whiskermenu --pointer"
+else dock_apps_exec="xfce4-appfinder"; fi
+put "$D/applications/realhax-apps.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=Applications
+Comment=Show all applications
+Exec=$dock_apps_exec
+Icon=realhax-dock-apps
+NoDisplay=true
 EOF
-plank_apply() { dconf write /net/launchpad/plank/enabled-docks "['dock1']" && dconf load /net/launchpad/plank/docks/dock1/ < "$RH/plank.dconf"; }
-plank_apply 2>/dev/null || warn "dconf unavailable now; dock settings will apply at first XFCE login"
+dock_item apps      -                       realhax-apps.desktop
+
+# Clearly-marked addition to section 7's xfce4-panel.xml (rewritten on every run):
+# insert panel-$DOCK_PANEL into /panels and its launcher plugins into /plugins.
+PX="$X/xfce4-panel.xml"
+if [[ -f $PX ]] && (( ${#dock_ids[@]} )) && ! grep -q "\"panel-$DOCK_PANEL\"" "$PX"; then
+  # xfconf drops everything after an array <value> that follows a child property,
+  # so the id goes first in /panels and the panel-N block before the first child.
+  {
+    echo "    <property name=\"panel-$DOCK_PANEL\" type=\"empty\">"
+    echo "      <property name=\"position\" type=\"string\" value=\"$(dock_pos | grep . || echo 'p=0;x=960;y=1022')\"/>"
+    echo "      <property name=\"position-locked\" type=\"bool\" value=\"true\"/>"
+    echo "      <property name=\"mode\" type=\"uint\" value=\"0\"/>"
+    echo "      <property name=\"size\" type=\"uint\" value=\"$DOCK_SIZE\"/>"
+    echo "      <property name=\"icon-size\" type=\"uint\" value=\"$DOCK_ICON\"/>"
+    echo "      <property name=\"length\" type=\"uint\" value=\"1\"/>"
+    echo "      <property name=\"length-adjust\" type=\"bool\" value=\"true\"/>"
+    echo "      <property name=\"disable-struts\" type=\"bool\" value=\"true\"/>"
+    echo "      <property name=\"background-style\" type=\"uint\" value=\"1\"/>"
+    echo "      <property name=\"background-rgba\" type=\"array\">"
+    echo "        <value type=\"double\" value=\"0\"/><value type=\"double\" value=\"0\"/>"
+    echo "        <value type=\"double\" value=\"0\"/><value type=\"double\" value=\"0\"/>"
+    echo "      </property>"
+    echo "      <property name=\"plugin-ids\" type=\"array\">"
+    for i in "${dock_ids[@]}"; do echo "        <value type=\"int\" value=\"$i\"/>"; done
+    echo "      </property>"
+    echo "    </property>"
+  } > "$TMP/dock-panel.xml"
+  printf '%s' "$dock_plugins" > "$TMP/dock-plugins.xml"
+  awk -v pf="$TMP/dock-panel.xml" -v gf="$TMP/dock-plugins.xml" -v id="$DOCK_PANEL" '
+    inp && !done && /<property name=/ { while ((getline l < pf) > 0) print l; done = 1 }
+    { print }
+    /<property name="panels" type="array">/ { inp = 1; print "    <value type=\"int\" value=\"" id "\"/>" }
+    /<property name="plugins" type="empty">/ { while ((getline l < gf) > 0) print l }
+  ' "$PX" > "$TMP/panel.xml" && cat "$TMP/panel.xml" > "$PX"
+fi
+
+# Dock styling. Each launcher button draws one slice of the rounded box.
+dock_sel() { local s="" i; for i in "${dock_ids[@]}"; do s+="${s:+, }#launcher-$i${1:-}"; done; echo "$s"; }
+dock_first=0; dock_last=0
+(( ${#dock_ids[@]} )) && { dock_first=${dock_ids[0]}; dock_last=${dock_ids[${#dock_ids[@]}-1]}; }
+put "$C/gtk-3.0/realhax-dock.css" <<EOF
+/* realhax dock (xfce4-panel panel-$DOCK_PANEL, launchers $dock_first..$dock_last) */
+$(dock_sel " button") {
+  margin: 0; padding: 0 4px; min-width: 0; min-height: 0;
+  background: rgba(13, 14, 18, 0.86); box-shadow: none; outline: none; transition: none;
+  border: solid rgba(255, 255, 255, 0.10); border-width: 1px 0; border-radius: 0;
+}
+#launcher-$dock_first button { border-left-width: 1px; border-radius: 16px 0 0 16px; padding-left: 14px; }
+#launcher-$dock_last button  { border-right-width: 1px; border-radius: 0 16px 16px 0; padding-left: 18px; padding-right: 14px; }
+$(dock_sel " button > *") { margin: 9px 0; padding: 0 4px; border: 2px solid transparent; border-radius: 10px; }
+$(dock_sel " button:hover > *") { background-color: rgba(255, 255, 255, 0.07); }
+#launcher-$dock_first button > * { border-color: $RED; background-color: rgba(6, 7, 9, 0.95); }
+EOF
+# Inline it into gtk.css as its own delimited block (an @import after the
+# section-7 rules would be ignored by GTK); re-runs replace only this block.
+GC="$C/gtk-3.0/gtk.css"
+{ [[ -f $GC ]] && sed -e '/^\/\* >>> realhax-dock >>> \*\/$/,/^\/\* <<< realhax-dock <<< \*\/$/d' \
+                     -e '/^@import url("realhax-dock.css");$/d' "$GC"
+  echo '/* >>> realhax-dock >>> */'; cat "$C/gtk-3.0/realhax-dock.css"; echo '/* <<< realhax-dock <<< */'
+} > "$TMP/gtk.css"
+put "$GC" < "$TMP/gtk.css"
 
 # --------------------------------------------------------------------------- 10. conky widgets
 # One conky instance draws both cards ("System" + "Lab Info") with Lua/Cairo in a
@@ -917,7 +979,7 @@ rm -f "$C/conky/realhax-labinfo.conf" "$C/autostart/realhax-conky1.desktop" "$C/
 put "$HOME/.local/bin/realhax-session-init" <<EOF
 #!/bin/sh
 # realhax: runs at every XFCE login. Points every monitor/workspace at the
-# wallpaper (monitor names differ per machine) and applies dock settings once.
+# wallpaper (monitor names differ per machine) and re-centres the floating dock.
 WP="$WALL"
 xset_() { xfconf-query -c xfce4-desktop -p "\$1" -s "\$3" 2>/dev/null || xfconf-query -c xfce4-desktop -p "\$1" -n -t "\$2" -s "\$3"; }
 for m in \$(xrandr --listmonitors 2>/dev/null | awk 'NR>1{print \$NF}'); do
@@ -929,9 +991,11 @@ for m in \$(xrandr --listmonitors 2>/dev/null | awk 'NR>1{print \$NF}'); do
   done
 done
 for p in \$(xfconf-query -c xfce4-desktop -l | grep '/last-image\$'); do xfconf-query -c xfce4-desktop -p "\$p" -s "\$WP"; done
-if [ ! -f "$RH/.plank-applied" ]; then
-  dconf write /net/launchpad/plank/enabled-docks "['dock1']" && dconf load /net/launchpad/plank/docks/dock1/ < "$RH/plank.dconf" && touch "$RH/.plank-applied"
-fi
+# dock (panel-$DOCK_PANEL): float it centred, $DOCK_GAP px above the primary monitor's bottom edge
+DOCK_GAP=$DOCK_GAP; DOCK_SIZE=$DOCK_SIZE
+$(declare -f dock_pos)
+pos=\$(dock_pos)
+[ -n "\$pos" ] && xfconf-query -c xfce4-panel -p /panels/panel-$DOCK_PANEL/position -s "\$pos" 2>/dev/null
 EOF
 chmod +x "$HOME/.local/bin/realhax-session-init"
 
@@ -947,7 +1011,7 @@ NoDisplay=true
 EOF
 }
 autostart init   "$HOME/.local/bin/realhax-session-init"
-autostart plank  "sh -c 'sleep 2; exec plank'"
+rm -f "$C/autostart/realhax-plank.desktop"   # the dock is panel-$DOCK_PANEL now (section 9), not plank
 autostart conky  "sh -c 'sleep 4; exec conky -q -c $C/conky/realhax-system.conf'"
 
 # --------------------------------------------------------------------------- 12. alacritty
@@ -1145,9 +1209,9 @@ if [[ "${XDG_CURRENT_DESKTOP:-}" == *XFCE* ]]; then
   xfce4-panel -r >/dev/null 2>&1 || true
   "$HOME/.local/bin/realhax-session-init" >/dev/null 2>&1 || true
   xfdesktop --reload >/dev/null 2>&1 || true
-  pkill -u "$USER" -x plank 2>/dev/null || true; (plank >/dev/null 2>&1 &)
+  pkill -u "$USER" -x plank 2>/dev/null || true   # old dock from v1; the dock is panel-2 now
   pkill -u "$USER" -x conky 2>/dev/null || true
-  (conky -q -d -c "$C/conky/realhax-system.conf"; conky -q -d -c "$C/conky/realhax-labinfo.conf") >/dev/null 2>&1 || true
+  conky -q -d -c "$C/conky/realhax-system.conf" >/dev/null 2>&1 || true
   log "realhax desktop $RH_VERSION applied."
 else
   log "realhax desktop $RH_VERSION installed. Log out and choose the 'Xfce Session' at the login screen."
