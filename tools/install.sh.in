@@ -285,7 +285,7 @@ install -Dm644 "$TMP/wall.png" "$WALL"
 # --------------------------------------------------------------------------- 7. XFCE settings (xfconf XML)
 # Write channels directly so the result is identical on first login. Stop xfconfd
 # first so it can't overwrite our files from its in-memory cache.
-pkill -u "$USER" -x xfconfd 2>/dev/null || true
+[[ -n ${REALHAX_NO_PKILL:-} ]] || pkill -u "$USER" -x xfconfd 2>/dev/null || true
 X="$C/xfce4/xfconf/xfce-perchannel-xml"
 
 put "$X/xsettings.xml" <<'EOF'
