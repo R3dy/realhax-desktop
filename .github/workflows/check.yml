@@ -1,0 +1,13 @@
+name: check
+on: [push, pull_request]
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: install.sh is up to date with tools/
+        run: tools/build.sh && git diff --exit-code install.sh
+      - name: syntax
+        run: bash -n install.sh && bash install.sh --help
+      - name: shellcheck
+        run: shellcheck -S error tools/install.sh.in
