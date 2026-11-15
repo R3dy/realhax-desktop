@@ -13,6 +13,7 @@
 #    --skip-packages   don't touch system packages (no sudo)
 #    --no-apps         don't install dock apps (VS Code, Wireshark)
 #    --keep-session    don't make XFCE the default login session
+#    --no-wallpaper-text  use the plain wallpaper (no overlaid slogans)
 #    --restore         undo: restore every file this script replaced
 #    -h | --help
 #
@@ -39,18 +40,20 @@ WALLPAPER_SHA256="ea2a165b9b5e00b0a4513c1f04e46d83636037421349c799a73da9b2c61f3e
 # palette
 RED="#ff2340"; BG="#0b0c10"; FG="#d6d9df"; BLUE="#1f4fa8"
 
-SKIP_PKGS=0; NO_APPS=0; KEEP_SESSION=0; RESTORE=0
+SKIP_PKGS=0; NO_APPS=0; KEEP_SESSION=0; RESTORE=0; NO_WALL_TEXT=0
 for a in "$@"; do
   case "$a" in
     --skip-packages) SKIP_PKGS=1 ;;
     --no-apps) NO_APPS=1 ;;
     --keep-session) KEEP_SESSION=1 ;;
+    --no-wallpaper-text) NO_WALL_TEXT=1 ;;
     --restore) RESTORE=1 ;;
     -h|--help) printf '%s\n' "realhax-desktop $RH_VERSION" "" \
         "Usage: bash install.sh [options]" \
         "  --skip-packages   don't touch system packages (no sudo)" \
         "  --no-apps         don't install dock apps (VS Code, Wireshark)" \
         "  --keep-session    don't make XFCE the default login session" \
+        "  --no-wallpaper-text  use the plain wallpaper (no overlaid slogans)" \
         "  --restore         undo: restore every file this script replaced"; exit 0 ;;
     *) echo "unknown option: $a" >&2; exit 2 ;;
   esac
@@ -71,7 +74,7 @@ warn() { printf '\033[1;33m[realhax] WARN:\033[0m %s\n' "$*" >&2; }
 # --------------------------------------------------------------------------- restore
 if (( RESTORE )); then
   log "Restoring originals from $BACKUP"
-  pkill -u "$USER" -x xfconfd 2>/dev/null || true
+  [[ -n ${REALHAX_NO_PKILL:-} ]] || pkill -u "$USER" -x xfconfd 2>/dev/null || true
   while IFS= read -r f; do
     [[ -z $f ]] && continue
     rel="${f#/}"
@@ -217,6 +220,8 @@ if [[ ! -f "$HOME/.themes/RealHax-Dark/.realhax-$ORCHIS_TAG" ]]; then
     fetch "https://github.com/vinceliuice/Orchis-theme/archive/refs/tags/$ORCHIS_TAG.tar.gz" "$ORCHIS_SHA256" "$TMP/orchis.tgz"
     tar -xzf "$TMP/orchis.tgz" -C "$TMP"
     mkdir -p "$TMP/themes"
+    # core.sh runs `xfce4-panel -r` if ANY xfce4-session is running (pgrep): drop it
+    sed -i 's/^\([[:space:]]*\)xfce4-panel -r$/\1:/' "$TMP/Orchis-theme-$ORCHIS_TAG/core.sh"
     (cd "$TMP/Orchis-theme-$ORCHIS_TAG" && bash ./install.sh -d "$TMP/themes" -n RealHax -t red -c dark --tweaks black >/dev/null)
     mkdir -p "$HOME/.themes"
     for sfx in "" -hdpi -xhdpi; do
@@ -228,6 +233,45 @@ if [[ ! -f "$HOME/.themes/RealHax-Dark/.realhax-$ORCHIS_TAG" ]]; then
     touch "$HOME/.themes/RealHax-Dark/.realhax-$ORCHIS_TAG"
   else warn "sassc missing — cannot build GTK theme (install packages first)"; fi
 fi
+# xfwm4 tweaks, re-applied every run: red close "X", app icon at the left of the
+# title bar, fixed dark title-bar colours (instead of whatever GTK reports).
+xclose() { # xclose <colour> <circle-opacity>
+  printf '<svg xmlns="http://www.w3.org/2000/svg" width="34" height="36">%s<path d="M13 15 L21 23 M21 15 L13 23" fill="none" stroke="%s" stroke-width="2.4" stroke-linecap="round"/></svg>\n' \
+    "$( [[ $2 == 0 ]] || printf '<circle cx="17" cy="19" r="12" fill="#fff" opacity="%s"/>' "$2")" "$1"
+}
+for sfx in "" -hdpi -xhdpi; do
+  xd="$HOME/.themes/RealHax-Dark$sfx/xfwm4"; [[ -f $xd/themerc ]] || continue
+  xclose "$RED"    0   > "$xd/close-active.svg"
+  xclose "#ff5a6e" .12 > "$xd/close-prelight.svg"
+  xclose "#c80f28" .2  > "$xd/close-pressed.svg"
+  sed -i '/^show_app_icon=/d; /^active_color_2=/d; /^inactive_color_2=/d' "$xd/themerc"
+  printf '%s\n' "show_app_icon=true" "active_color_2=#0e131a" "inactive_color_2=#0b0e13" >> "$xd/themerc"
+done
+
+# Panel-only GTK CSS (big hex logo + red underline on the whisker button). The user's
+# gtk.css also styles GNOME apps, so keep its content and (re)write only our block.
+GTKCSS="$C/gtk-3.0/gtk.css"
+{ [[ -f $GTKCSS ]] && sed '/^\/\* >>> realhax >>> \*\/$/,/^\/\* <<< realhax <<< \*\/$/d' "$GTKCSS"
+  cat <<EOF
+/* >>> realhax >>> */
+#whiskermenu-button {
+  background-color: transparent;
+  background-image: -gtk-icontheme("realhax"), linear-gradient($RED, $RED),
+    linear-gradient(to top, alpha($RED, 0.22), alpha($RED, 0));
+  background-size: 28px 28px, 38px 2px, 38px 100%;
+  background-position: 6px center, 1px 100%, 1px 0;
+  background-repeat: no-repeat;
+  padding-left: 44px; padding-right: 10px;
+  border-radius: 0;
+}
+#whiskermenu-button:hover { background-color: alpha(#ffffff, 0.06); }
+#whiskermenu-button label { font-weight: 600; color: #f2f3f5; }
+/* white symbolic icons + clock on the panel only */
+.xfce4-panel.background button, .xfce4-panel.background label { color: #f2f3f5; }
+/* <<< realhax <<< */
+EOF
+} > "$TMP/gtk.css"
+put "$GTKCSS" < "$TMP/gtk.css"
 
 # --------------------------------------------------------------------------- 5. icons + logo
 LOGO_SVG='<svg xmlns="http://www.w3.org/2000/svg" viewBox="-128 -128 256 256"><defs><linearGradient id="m" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fff"/><stop offset=".5" stop-color="#b9c7de"/><stop offset="1" stop-color="#6d7d99"/></linearGradient></defs><g transform="scale(1.12)"><path d="M0,-100 L86.6,-50 L86.6,50 L0,100 L-86.6,50 L-86.6,-50 Z" fill="#0c1018"/><path d="M0,-100 L86.6,-50 L86.6,50 L0,100 L-86.6,50 L-86.6,-50 Z" fill="none" stroke="url(#m)" stroke-width="16" stroke-dasharray="88 12" stroke-dashoffset="44"/><path d="M0,-100 L86.6,-50 L86.6,50 L0,100 L-86.6,50 L-86.6,-50 Z" transform="scale(.74)" fill="none" stroke="url(#m)" stroke-width="7"/><path d="M-38,-26 L-6,2 L-38,30" fill="none" stroke="#fff" stroke-width="13" stroke-linecap="square"/><path d="M6,32 L44,32" stroke="#fff" stroke-width="13"/></g></svg>'
@@ -280,12 +324,42 @@ else
   log "Downloading wallpaper"
   fetch "$WALLPAPER_URL" "$WALLPAPER_SHA256" "$TMP/wall.png"
 fi
-install -Dm644 "$TMP/wall.png" "$WALL"
+install -Dm644 "$TMP/wall.png" "$RH/wallpaper-raw.png"
+
+# Overlay the mockup's slogans at install time: a tiny SVG (raw image + text) is
+# rendered by rsvg-convert to 2560x1440 so the text stays crisp when zoomed. This
+# keeps one pinned binary asset in the repo and the text editable here; output
+# only depends on the pinned image and the pinned JetBrains Mono (section 2).
+# Text sits left of the conky cards (right ~270px of the screen) down to 1366px.
+if (( ! NO_WALL_TEXT )) && command -v rsvg-convert >/dev/null; then
+  cat > "$TMP/wall.svg" <<EOF
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="2560" height="1440" viewBox="0 0 2560 1440">
+  <image x="0" y="0" width="2560" height="1440" preserveAspectRatio="xMidYMid slice" xlink:href="wall.png" href="wall.png"/>
+  <g font-family="JetBrainsMono Nerd Font, JetBrains Mono, DejaVu Sans Mono, monospace" font-size="16" letter-spacing="4.4" fill="#c9cdd5">
+    <text x="248" y="208" opacity=".78">OFFENSIVE SECURITY TRAINING</text>
+    <rect x="248" y="230" width="58" height="1.5" fill="#8a909c" opacity=".7"/>
+    <rect x="1888" y="186" width="1.5" height="124" fill="#8a909c" opacity=".55"/>
+    <g opacity=".72"><text x="1918" y="205">LABS</text><text x="1918" y="239">SKILLS</text>
+      <text x="1918" y="273">PRACTICE</text><text x="1918" y="307">PROGRESS</text></g>
+    <rect x="2196" y="1192" width="26" height="3" fill="$RED"/>
+    <g fill="#e4e6eb" opacity=".88"><text x="2196" y="1226">REAL SKILLS.</text>
+      <text x="2196" y="1254">REAL ENVIRONMENTS.</text><text x="2196" y="1282">REAL OUTCOMES.</text></g>
+  </g>
+</svg>
+EOF
+  if (cd "$TMP" && rsvg-convert -w 2560 -h 1440 -o wall-text.png wall.svg) 2>/dev/null; then
+    install -Dm644 "$TMP/wall-text.png" "$WALL"
+  else
+    warn "rsvg-convert failed — using the plain wallpaper"; install -Dm644 "$TMP/wall.png" "$WALL"
+  fi
+else
+  install -Dm644 "$TMP/wall.png" "$WALL"
+fi
 
 # --------------------------------------------------------------------------- 7. XFCE settings (xfconf XML)
 # Write channels directly so the result is identical on first login. Stop xfconfd
 # first so it can't overwrite our files from its in-memory cache.
-pkill -u "$USER" -x xfconfd 2>/dev/null || true
+[[ -n ${REALHAX_NO_PKILL:-} ]] || pkill -u "$USER" -x xfconfd 2>/dev/null || true
 X="$C/xfce4/xfconf/xfce-perchannel-xml"
 
 put "$X/xsettings.xml" <<'EOF'
@@ -331,7 +405,7 @@ put "$X/xfce4-desktop.xml" <<EOF
 <channel name="xfce4-desktop" version="1.0">
   <property name="desktop-icons" type="empty">
     <property name="style" type="int" value="2"/>
-    <property name="icon-size" type="uint" value="44"/>
+    <property name="icon-size" type="uint" value="40"/>
     <property name="tooltip-size" type="double" value="48"/>
     <property name="show-thumbnails" type="bool" value="false"/>
     <property name="file-icons" type="empty">
@@ -358,17 +432,18 @@ put "$X/xfce4-panel.xml" <<'EOF'
       <property name="position" type="string" value="p=6;x=0;y=0"/>
       <property name="length" type="uint" value="100"/>
       <property name="position-locked" type="bool" value="true"/>
-      <property name="size" type="uint" value="38"/>
-      <property name="icon-size" type="uint" value="18"/>
+      <property name="size" type="uint" value="40"/>
+      <property name="icon-size" type="uint" value="20"/>
       <property name="background-style" type="uint" value="1"/>
       <property name="background-rgba" type="array">
         <value type="double" value="0.039"/><value type="double" value="0.043"/>
         <value type="double" value="0.055"/><value type="double" value="0.92"/>
       </property>
       <property name="plugin-ids" type="array">
-        <value type="int" value="1"/><value type="int" value="2"/><value type="int" value="3"/>
-        <value type="int" value="4"/><value type="int" value="5"/><value type="int" value="6"/>
-        <value type="int" value="7"/><value type="int" value="8"/><value type="int" value="9"/>
+        <value type="int" value="1"/><value type="int" value="2"/><value type="int" value="10"/>
+        <value type="int" value="4"/><value type="int" value="5"/><value type="int" value="3"/>
+        <value type="int" value="6"/><value type="int" value="7"/><value type="int" value="8"/>
+        <value type="int" value="9"/>
       </property>
     </property>
   </property>
@@ -377,7 +452,7 @@ put "$X/xfce4-panel.xml" <<'EOF'
       <property name="button-title" type="string" value="Applications"/>
       <property name="button-icon" type="string" value="realhax"/>
       <property name="show-button-title" type="bool" value="true"/>
-      <property name="show-button-icon" type="bool" value="true"/>
+      <property name="show-button-icon" type="bool" value="false"/>
       <property name="button-single-row" type="bool" value="false"/>
       <property name="menu-opacity" type="int" value="96"/>
       <property name="view-mode" type="int" value="1"/>
@@ -388,7 +463,7 @@ put "$X/xfce4-panel.xml" <<'EOF'
     </property>
     <property name="plugin-3" type="string" value="systray">
       <property name="square-icons" type="bool" value="true"/>
-      <property name="icon-size" type="int" value="18"/>
+      <property name="icon-size" type="int" value="20"/>
     </property>
     <property name="plugin-4" type="string" value="notification-plugin"/>
     <property name="plugin-5" type="string" value="pulseaudio">
@@ -400,7 +475,7 @@ put "$X/xfce4-panel.xml" <<'EOF'
     <property name="plugin-7" type="string" value="clock">
       <property name="mode" type="uint" value="2"/>
       <property name="digital-layout" type="uint" value="3"/>
-      <property name="digital-time-format" type="string" value="%a %b %d  %H:%M"/>
+      <property name="digital-time-format" type="string" value="%a %b %-d  %H:%M"/>
       <property name="digital-time-font" type="string" value="Inter Medium 10"/>
     </property>
     <property name="plugin-8" type="string" value="separator">
@@ -409,6 +484,11 @@ put "$X/xfce4-panel.xml" <<'EOF'
     <property name="plugin-9" type="string" value="launcher">
       <property name="items" type="array">
         <value type="string" value="realhax-power.desktop"/>
+      </property>
+    </property>
+    <property name="plugin-10" type="string" value="launcher">
+      <property name="items" type="array">
+        <value type="string" value="realhax-display.desktop"/>
       </property>
     </property>
   </property>
@@ -423,12 +503,20 @@ Comment=Log out, restart or shut down
 Exec=xfce4-session-logout
 Icon=system-shutdown-symbolic
 EOF
+put "$C/xfce4/panel/launcher-10/realhax-display.desktop" <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Display
+Comment=Display settings
+Exec=xfce4-display-settings
+Icon=video-display-symbolic
+EOF
 
 put "$C/xfce4/panel/whiskermenu-1.rc" <<'EOF'
 button-title=Applications
 button-icon=realhax
 show-button-title=true
-show-button-icon=true
+show-button-icon=false
 menu-opacity=96
 view-mode=1
 EOF
@@ -472,6 +560,23 @@ chmod +x "$DESK/Terminal.desktop"
 # XFCE 4.18 trusts a desktop launcher whose checksum is stored in gvfs metadata
 gio set -t string "$DESK/Terminal.desktop" metadata::xfce-exe-checksum \
   "$(sha256sum "$DESK/Terminal.desktop" | cut -d' ' -f1)" 2>/dev/null || true
+
+# Desktop icon order (one column): Home, Terminal, Tools, Recon, Reports, Trash.
+# xfdesktop 4.18 keys positions by icon path ("Trash" for the trash) in
+# icons.screen0-<workarea WxH>.rc and, for a work area it has never seen, falls
+# back to icons.screen.latest.rc. So write the order as latest.rc (works for any
+# resolution) and over every per-resolution file a previous run/session saved.
+ICONS_DIR="$C/xfce4/desktop"
+{ printf '[xfdesktop-version-4.10.3+-rcfile_format]\n4.10.3+=true\n'
+  row=0
+  for k in "$HOME" "$DESK/Terminal.desktop" "$DESK/Tools" "$DESK/Recon" "$DESK/Reports" Trash; do
+    printf '\n[%s]\nrow=%d\ncol=0\n' "$k" "$row"; row=$((row + 1))
+  done; } > "$TMP/icons.rc"
+for f in "$ICONS_DIR"/icons.screen*.rc "$ICONS_DIR/icons.screen.latest.rc"; do
+  [[ -e $f || -L $f || $f == */icons.screen.latest.rc ]] || continue
+  [[ -L $f ]] && { track "$f"; rm -f "$f"; }   # xfdesktop makes latest.rc a symlink
+  put "$f" < "$TMP/icons.rc"
+done
 
 # --------------------------------------------------------------------------- 9. plank dock
 put "$D/plank/themes/RealHax/dock.theme" <<'EOF'
