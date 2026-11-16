@@ -58,7 +58,7 @@ Primary target: Ubuntu 24.04. The script also has package maps for Debian/Ubuntu
 
 - Every download is pinned to a version and checked against a sha256. A mismatch aborts the install.
 - XFCE settings are written straight to the xfconf XML files, so the first login always looks the same.
-- At each XFCE login, `realhax-session-init` points the wallpaper at whatever monitor names that machine has.
+- `realhax-session-init` runs for the whole XFCE session. It points the wallpaper at whatever monitor names that machine has, and whenever the screen changes size (a VM window or KasmVNC browser resize, a new monitor) it re-centres the dock at the bottom and restarts the widgets so they stay top-right.
 - Desktop icon order: xfdesktop 4.18 stores positions per work-area size and falls back to `icons.screen.latest.rc` for a size it hasn't seen. The installer writes the order there and over any per-size file already saved.
 - Re-running is safe. Originals are backed up once, the first time a file is replaced, under `~/.local/share/realhax/backup`, and listed in `manifest.txt`.
 

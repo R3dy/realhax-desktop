@@ -606,7 +606,8 @@ done
 # draws its background flush against the screen edge (Top/BottomPadding only
 # pad icons inside it, in tenths of IconSize), so it cannot float. A panel with
 # snap position 0 is placed by its centre point, so it can float DOCK_GAP px
-# above the bottom edge; realhax-session-init re-centres it on every login.
+# above the bottom edge; realhax-session-init keeps it there whenever the
+# screen changes size.
 # Its window is fully transparent; the rounded box is drawn by the launchers'
 # buttons, one slice each (#launcher-<id> is per-plugin, so the top panel is
 # untouched) via ~/.config/gtk-3.0/realhax-dock.css. The terminal keeps the
@@ -999,27 +1000,78 @@ EOF
 rm -f "$C/conky/realhax-labinfo.conf" "$C/autostart/realhax-conky1.desktop" "$C/autostart/realhax-conky2.desktop"
 
 # --------------------------------------------------------------------------- 11. session init + autostart (XFCE only)
-put "$HOME/.local/bin/realhax-session-init" <<EOF
+# The layout follows the screen: the dock (panel-$DOCK_PANEL, snap position 0
+# = placed by its centre point) sits bottom-centre $DOCK_GAP px above the
+# primary monitor's bottom edge, and conky is top_right-aligned with gap_x.
+# Neither re-places itself when the screen changes size (a KasmVNC browser
+# resize, a VM window resize, a new monitor), so the init script runs as a
+# watcher for the whole session: every 2s it compares the screen geometry and,
+# when it changes, re-centres the dock, restarts conky (conky only computes its
+# alignment at start) and re-points the wallpaper at any new monitor names.
+# One watcher per display (flock); it exits when the X server goes away.
+# A watcher from an earlier run is stopped first: sh reads its script as it
+# runs, and put rewrites the file in place.
+pkill -u "$USER" -f 'realhax-session-init --watch' 2>/dev/null || true
+{ cat <<EOF
 #!/bin/sh
-# realhax: runs at every XFCE login. Points every monitor/workspace at the
-# wallpaper (monitor names differ per machine) and re-centres the floating dock.
+# realhax: runs for the whole XFCE session (autostart: --watch). Points every
+# monitor/workspace at the wallpaper, keeps the floating dock bottom-centre and
+# the conky widgets top-right, and re-places both whenever the screen resizes.
+# Without --watch it applies the layout once and exits.
 WP="$WALL"
-xset_() { xfconf-query -c xfce4-desktop -p "\$1" -s "\$3" 2>/dev/null || xfconf-query -c xfce4-desktop -p "\$1" -n -t "\$2" -s "\$3"; }
-for m in \$(xrandr --listmonitors 2>/dev/null | awk 'NR>1{print \$NF}'); do
-  for ws in 0 1 2 3; do
-    b=/backdrop/screen0/monitor\$m/workspace\$ws
-    xset_ \$b/last-image string "\$WP"
-    xset_ \$b/image-style int 5
-    xset_ \$b/color-style int 0
-  done
-done
-for p in \$(xfconf-query -c xfce4-desktop -l | grep '/last-image\$'); do xfconf-query -c xfce4-desktop -p "\$p" -s "\$WP"; done
-# dock (panel-$DOCK_PANEL): float it centred, $DOCK_GAP px above the primary monitor's bottom edge
-DOCK_GAP=$DOCK_GAP; DOCK_SIZE=$DOCK_SIZE
+CONKY_CONF="$C/conky/realhax-system.conf"
+DOCK_PANEL=$DOCK_PANEL; DOCK_GAP=$DOCK_GAP; DOCK_SIZE=$DOCK_SIZE
 $(declare -f dock_pos)
-pos=\$(dock_pos)
-[ -n "\$pos" ] && xfconf-query -c xfce4-panel -p /panels/panel-$DOCK_PANEL/position -s "\$pos" 2>/dev/null
 EOF
+cat <<'EOF'
+xset_() { xfconf-query -c xfce4-desktop -p "$1" -s "$3" 2>/dev/null || xfconf-query -c xfce4-desktop -p "$1" -n -t "$2" -s "$3"; }
+monitors() { xrandr --listmonitors 2>/dev/null | awk 'NR>1{print $NF}'; }
+apply_wallpaper() {
+  for m in $(monitors); do
+    for ws in 0 1 2 3; do
+      b=/backdrop/screen0/monitor$m/workspace$ws
+      xset_ $b/last-image string "$WP"
+      xset_ $b/image-style int 5
+      xset_ $b/color-style int 0
+    done
+  done
+  for p in $(xfconf-query -c xfce4-desktop -l 2>/dev/null | grep '/last-image$'); do
+    xfconf-query -c xfce4-desktop -p "$p" -s "$WP"
+  done
+}
+place_dock() {
+  pos=$(dock_pos)
+  [ -n "$pos" ] || return 0
+  [ "$pos" = "$(xfconf-query -c xfce4-panel -p /panels/panel-$DOCK_PANEL/position 2>/dev/null)" ] && return 0
+  xfconf-query -c xfce4-panel -p /panels/panel-$DOCK_PANEL/position -s "$pos" 2>/dev/null
+}
+restart_conky() {
+  pgrep -u "$(id -u)" -f "$CONKY_CONF" >/dev/null || return 0   # not started yet: autostart will
+  pkill -u "$(id -u)" -f "$CONKY_CONF"
+  sleep 0.3
+  conky -q -d -c "$CONKY_CONF" >/dev/null 2>&1
+}
+geometry() { xrandr --current 2>/dev/null | sed -n 's/.*current \([0-9]*\) x \([0-9]*\).*/\1x\2/p'; xrandr --listmonitors 2>/dev/null | sed 1d; }
+
+apply_wallpaper
+place_dock
+[ "${1:-}" = --watch ] || exit 0
+
+exec 9>"${XDG_RUNTIME_DIR:-/tmp}/realhax-layout-$(id -u)-${DISPLAY:-none}.lock"
+flock -n 9 || exit 0
+last=$(geometry); mons=$(monitors)
+while sleep 2; do
+  xrandr --current >/dev/null 2>&1 || exit 0          # session over
+  now=$(geometry)
+  [ "$now" = "$last" ] && continue
+  sleep 1; now=$(geometry)                             # let a drag-resize settle
+  last=$now
+  place_dock
+  restart_conky
+  if [ "$(monitors)" != "$mons" ]; then mons=$(monitors); apply_wallpaper; fi
+done
+EOF
+} | put "$HOME/.local/bin/realhax-session-init"
 chmod +x "$HOME/.local/bin/realhax-session-init"
 
 autostart() { # name exec
@@ -1033,7 +1085,7 @@ X-GNOME-Autostart-enabled=true
 NoDisplay=true
 EOF
 }
-autostart init   "$HOME/.local/bin/realhax-session-init"
+autostart init   "$HOME/.local/bin/realhax-session-init --watch"
 rm -f "$C/autostart/realhax-plank.desktop"   # the dock is panel-$DOCK_PANEL now (section 9), not plank
 autostart conky  "sh -c 'sleep 4; exec conky -q -c $C/conky/realhax-system.conf'"
 
@@ -1364,6 +1416,7 @@ if [[ "${XDG_CURRENT_DESKTOP:-}" == *XFCE* ]]; then
   (xfwm4 --replace >/dev/null 2>&1 &)
   xfce4-panel -r >/dev/null 2>&1 || true
   "$HOME/.local/bin/realhax-session-init" >/dev/null 2>&1 || true
+  (setsid "$HOME/.local/bin/realhax-session-init" --watch >/dev/null 2>&1 &)
   xfdesktop --reload >/dev/null 2>&1 || true
   pkill -u "$USER" -x plank 2>/dev/null || true   # old dock from v1; the dock is panel-2 now
   pkill -u "$USER" -x conky 2>/dev/null || true
