@@ -24,6 +24,7 @@ curl -fsSL https://raw.githubusercontent.com/R3dy/realhax-desktop/main/install.s
 | `--keep-session` | don't make XFCE the default login session |
 | `--skip-packages` | user-level config only, no sudo |
 | `--no-wallpaper-text` | use the plain wallpaper, without the overlaid slogans |
+| `--lab-persona` | the fastfetch card shows `student@realhax` / `Training VM` instead of your real user and host |
 | `--restore` | put back every file the installer replaced |
 
 To read the script before running it:
@@ -39,7 +40,7 @@ Primary target: Ubuntu 24.04. The script also has package maps for Debian/Ubuntu
 
 | Step | Result |
 |---|---|
-| Packages (apt / dnf / pacman / zypper) | XFCE 4.18, whiskermenu, plank, conky, Papirus, Inter, alacritty, fish, rsvg, sassc (+ VS Code and Wireshark). Packages a distro doesn't have are skipped with a warning. On apt it uses `--no-install-recommends`, so your display manager stays as it is. |
+| Packages (apt / dnf / pacman / zypper) | XFCE 4.18, whiskermenu, conky (Lua/Cairo), Papirus, Inter, alacritty, fish, rsvg, sassc (+ VS Code and Wireshark). Packages a distro doesn't have are skipped with a warning. On apt it uses `--no-install-recommends`, so your display manager stays as it is. |
 | Fonts | JetBrainsMono Nerd Font v3.4.0 (sha256-pinned) if missing |
 | fastfetch | pinned 2.40.4 static build if missing; `neofetch` maps to it |
 | GTK + xfwm4 theme | Orchis `2025-04-25` (sha256-pinned), red, black tweak, installed as **RealHax-Dark**. Title bar: dark, app icon at the left, thin minimise/maximise glyphs, red close X |
@@ -48,8 +49,8 @@ Primary target: Ubuntu 24.04. The script also has package maps for Debian/Ubuntu
 | Wallpaper | `assets/wallpaper.png` (sha256-pinned) with the mockup's text (OFFENSIVE SECURITY TRAINING, LABS / SKILLS / PRACTICE / PROGRESS, REAL SKILLS. …) overlaid at install time: an SVG with the image plus JetBrains Mono text, rendered by `rsvg-convert` to 2560x1440. Set on every monitor. The plain image is kept as `~/.local/share/realhax/wallpaper-raw.png` |
 | Panel | top bar: logo + "Applications" menu; on the right display settings, notifications, volume, tray (network), `Mon Oct 26  21:39` clock, power |
 | Desktop | Home, Terminal, Tools, Recon, Reports, Trash, in that order in one column at any resolution (positions written to xfdesktop's `icons.screen*.rc`) |
-| Dock | plank, RealHax theme: Terminal, Files, Firefox, VS Code, Editor, Wireshark, app grid |
-| Widgets | conky System (CPU, memory, disk, network graphs) and Lab Info (Attacker turns green when `tun0` is up, IP, OS, uptime) |
+| Dock | a second, rounded xfce4-panel floating 20px above the bottom edge: Terminal (highlighted), Files, Firefox, VS Code, Editor, Wireshark, a shield slot (KeePassXC / Burp / ZAP if installed), app grid |
+| Widgets | one conky Lua/Cairo widget drawing two rounded cards: System (CPU, memory, disk, network graphs) and Lab Info (Attacker turns green when `tun0` is up, IP, OS, uptime, and a clickable **Open Lab Guide** button that opens `$REALHAX_LAB_GUIDE_URL`, default https://realhax.io) |
 | Terminal | alacritty RealHax palette; prompt `user@host ~` with a blue path tag and a `❯` line (fish function, or starship via `STARSHIP_CONFIG` inside alacritty) |
 
 ## Determinism
@@ -68,10 +69,8 @@ Primary target: Ubuntu 24.04. The script also has package maps for Debian/Ubuntu
 
 ## Known gaps vs. the mockup
 
-- Plank sits flush on the screen edge, not floating.
-- Conky boxes have square corners.
-- "Open Lab Guide" is a label, not a button.
-- The "M" shield app in the mock dock isn't included.
-- The user and host name stay your own (the mock shows `student@realhax`).
+- The dock's terminal highlight is fixed; it doesn't follow the active window.
+- The fastfetch logo is truecolor block art, so it's blockier than the mockup's smooth render.
+- The "M" shield app in the mock dock isn't a real app; the slot uses KeePassXC, Burp or ZAP if one is installed.
 - The network icon comes from your tray applet (nm-applet), so its look depends on the applet.
 - The title-bar icon is the app's own icon (Alacritty's logo, not the mock's `>_`).
