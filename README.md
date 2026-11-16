@@ -40,7 +40,7 @@ Primary target: Ubuntu 24.04. The script also has package maps for Debian/Ubuntu
 
 | Step | Result |
 |---|---|
-| Packages (apt / dnf / pacman / zypper) | XFCE 4.18, whiskermenu, conky (Lua/Cairo), Papirus, Inter, alacritty, fish, rsvg, sassc (+ VS Code and Wireshark). Packages a distro doesn't have are skipped with a warning. On apt it uses `--no-install-recommends`, so your display manager stays as it is. |
+| Packages (apt / dnf / pacman / zypper) | XFCE 4.18, whiskermenu, conky (Lua/Cairo), Papirus, Inter, alacritty, fish, tmux, fzf, rsvg, sassc (+ VS Code and Wireshark). Packages a distro doesn't have are skipped with a warning. On apt it uses `--no-install-recommends`, so your display manager stays as it is. On Ubuntu releases without an alacritty package (22.04 and older) it adds the alacritty maintainer's `ppa:aslatter/ppa` first. |
 | Fonts | JetBrainsMono Nerd Font v3.4.0 (sha256-pinned) if missing |
 | fastfetch | pinned 2.40.4 static build if missing; `neofetch` maps to it |
 | GTK + xfwm4 theme | Orchis `2025-04-25` (sha256-pinned), red, black tweak, installed as **RealHax-Dark**. Title bar: dark, app icon at the left, thin minimise/maximise glyphs, red close X |
@@ -51,7 +51,8 @@ Primary target: Ubuntu 24.04. The script also has package maps for Debian/Ubuntu
 | Desktop | Home, Terminal, Tools, Recon, Reports, Trash, in that order in one column at any resolution (positions written to xfdesktop's `icons.screen*.rc`) |
 | Dock | a second, rounded xfce4-panel floating 20px above the bottom edge: Terminal (highlighted), Files, Firefox, VS Code, Editor, Wireshark, a shield slot (KeePassXC / Burp / ZAP if installed), app grid |
 | Widgets | one conky Lua/Cairo widget drawing two rounded cards: System (CPU, memory, disk, network graphs) and Lab Info (Attacker turns green when `tun0` is up, IP, OS, uptime, and a clickable **Open Lab Guide** button that opens `$REALHAX_LAB_GUIDE_URL`, default https://realhax.io) |
-| Terminal | alacritty RealHax palette; prompt `user@host ~` with a blue path tag and a `❯` line (fish function, or starship via `STARSHIP_CONFIG` inside alacritty) |
+| Terminal | alacritty RealHax palette; prompt `user@host ~` with a blue path tag and a `❯` line (fish function, or starship via `STARSHIP_CONFIG` inside alacritty). **Ctrl+R** searches history with fzf (also Ctrl+T files, Alt+C cd), since fish before 3.6 has no Ctrl+R |
+| tmux | RealHax status bar (red session tag, blue current window, clock, host), red active-pane border, mouse on, windows numbered from 1, new windows open fish. The theme lives in `~/.config/realhax/tmux.conf`; `~/.tmux.conf` gets a delimited block that sources it, and the rest of your tmux.conf is kept |
 
 ## Determinism
 

@@ -6,6 +6,7 @@
 #  "RealHax" icon theme (Papirus-Dark + red folders), neon ring wallpaper,
 #  top panel (whisker "Applications" menu, tray, clock, power), floating dock,
 #  conky "System" + "Lab Info" widgets, alacritty + fish/starship prompt,
+#  RealHax tmux theme, fzf Ctrl+R history search,
 #  fastfetch/neofetch branding.
 #
 #  One-shot:  curl -fsSL https://raw.githubusercontent.com/R3dy/realhax-desktop/main/install.sh | bash
@@ -28,7 +29,7 @@
 # =============================================================================
 set -euo pipefail
 
-RH_VERSION="1.0.0"
+RH_VERSION="1.0.1"
 ORCHIS_TAG="2025-04-25"
 ORCHIS_SHA256="d479653415e271fe9f3324f1f4f51cf28b1134164667142c6c6a6db41cf4da9b"
 NERDFONT_VER="v3.4.0"
@@ -128,17 +129,17 @@ pkgs_for() {
     apt-get) echo "xfce4 xfce4-whiskermenu-plugin xfce4-pulseaudio-plugin xfce4-notifyd xfce4-appfinder
       thunar mousepad conky-all papirus-icon-theme fonts-inter fonts-dejavu-core alacritty fish
       librsvg2-bin sassc gtk2-engines-murrine curl git xz-utils x11-xserver-utils dconf-cli iproute2
-      libglib2.0-bin xdg-user-dirs network-manager-gnome" ;;
+      libglib2.0-bin xdg-user-dirs network-manager-gnome tmux fzf" ;;
     dnf) echo "xfce4-session xfwm4 xfdesktop xfce4-panel xfce4-settings xfconf Thunar mousepad xfce4-appfinder
       xfce4-whiskermenu-plugin xfce4-pulseaudio-plugin xfce4-notifyd conky papirus-icon-theme
       rsms-inter-fonts dejavu-sans-mono-fonts alacritty fish librsvg2-tools sassc gtk-murrine-engine curl git xz
-      xrandr dconf iproute glib2 xdg-user-dirs network-manager-applet" ;;
+      xrandr dconf iproute glib2 xdg-user-dirs network-manager-applet tmux fzf" ;;
     pacman) echo "xfce4 xfce4-whiskermenu-plugin xfce4-pulseaudio-plugin xfce4-notifyd conky
       papirus-icon-theme inter-font ttf-dejavu alacritty fish librsvg sassc gtk-engine-murrine curl git xz
-      xorg-xrandr dconf iproute2 glib2 xdg-user-dirs network-manager-applet" ;;
+      xorg-xrandr dconf iproute2 glib2 xdg-user-dirs network-manager-applet tmux fzf" ;;
     zypper) echo "patterns-xfce-xfce xfce4-whiskermenu-plugin xfce4-pulseaudio-plugin xfce4-notifyd conky
       papirus-icon-theme google-inter-fonts dejavu-fonts alacritty fish rsvg-convert sassc gtk2-engine-murrine
-      curl git xz xrandr dconf iproute2 glib2-tools xdg-user-dirs NetworkManager-applet" ;;
+      curl git xz xrandr dconf iproute2 glib2-tools xdg-user-dirs NetworkManager-applet tmux fzf" ;;
   esac
 }
 app_pkgs_for() {
@@ -149,7 +150,9 @@ app_pkgs_for() {
 }
 pkg_available() {
   case "$pm" in
-    apt-get) apt-cache show "$1" >/dev/null 2>&1 ;;
+    # not `apt-cache show`: it exits 0 for a name apt only knows from another
+    # package's metadata (alacritty on 22.04), which then fails the install
+    apt-get) [[ $(apt-cache policy "$1" 2>/dev/null) =~ Candidate:\ [^\(] ]] ;;
     dnf) dnf -q info "$1" >/dev/null 2>&1 ;;
     pacman) pacman -Si "$1" >/dev/null 2>&1 || pacman -Sg "$1" >/dev/null 2>&1 ;;
     zypper) zypper -q info "$1" 2>/dev/null | grep -q '^Name' ;;
@@ -173,6 +176,18 @@ add_vscode_repo() {
   esac
 }
 
+# Ubuntu before 23.04 (22.04 included) has no alacritty package. Its upstream
+# maintainer's PPA (ppa:aslatter/ppa) does. Added once; re-runs see it and skip.
+is_ubuntu() { [[ -r /etc/os-release ]] && grep -qE '^ID=ubuntu$|^ID_LIKE=.*ubuntu' /etc/os-release; }
+add_alacritty_ppa() {
+  grep -rqsE 'ppa\.launchpad(content)?\.net/aslatter/ppa' /etc/apt/sources.list /etc/apt/sources.list.d/ && return 1
+  log "alacritty isn't in your apt repos; adding ppa:aslatter/ppa"
+  command -v add-apt-repository >/dev/null \
+    || sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends software-properties-common gpg-agent \
+    || return 1
+  sudo add-apt-repository -y ppa:aslatter/ppa >/dev/null && sudo apt-get update -qq
+}
+
 if (( ! SKIP_PKGS )); then
   [[ -z $pm ]] && { echo "No supported package manager found (apt/dnf/pacman/zypper). Use --skip-packages." >&2; exit 1; }
   log "Installing packages with $pm (sudo)…"
@@ -183,6 +198,9 @@ if (( ! SKIP_PKGS )); then
     apt-get) sudo apt-get update -qq ;; dnf) sudo dnf -q makecache ;;
     pacman) sudo pacman -Sy --noconfirm >/dev/null ;; zypper) sudo zypper -q refresh ;;
   esac
+  if [[ $pm == apt-get ]] && ! pkg_available alacritty && is_ubuntu; then
+    add_alacritty_ppa || warn "could not add ppa:aslatter/ppa; alacritty will be skipped"
+  fi
   avail=(); missing=()
   for p in $want; do if pkg_available "$p"; then avail+=("$p"); else missing+=("$p"); fi; done
   (( ${#missing[@]} )) && warn "not in your repos, skipped: ${missing[*]}"
@@ -1151,6 +1169,78 @@ if not command -sq neofetch; and command -sq fastfetch
     function neofetch; fastfetch \$argv; end
 end
 EOF
+# Ctrl+R history search. fish only has a built-in Ctrl+R pager from 3.6, and
+# Ubuntu 22.04 ships 3.3, so use fzf's bindings (Ctrl+R history, Ctrl+T files,
+# Alt+C cd) wherever fzf is installed. fzf 0.48+ prints them itself; older
+# builds ship key-bindings.fish in a distro-specific place.
+put "$C/fish/conf.d/realhax-fzf.fish" <<'EOF'
+# realhax: fzf key bindings (Ctrl+R history search)
+if status is-interactive; and command -sq fzf
+    if fzf --fish >/dev/null 2>&1
+        fzf --fish | source
+    else
+        for f in /usr/share/doc/fzf/examples/key-bindings.fish /usr/share/fzf/shell/key-bindings.fish \
+                 /usr/share/fzf/key-bindings.fish /usr/share/fish/vendor_functions.d/fzf_key_bindings.fish
+            if test -r $f
+                source $f
+                break
+            end
+        end
+        functions -q fzf_key_bindings; and fzf_key_bindings
+    end
+end
+EOF
+
+# --------------------------------------------------------------------------- 13b. tmux theme
+# The RealHax palette for tmux, in its own file. ~/.tmux.conf gets a delimited
+# block that sources it: the rest of your tmux.conf is kept, and re-runs
+# replace only that block. New tmux windows open fish, like the terminal.
+if command -v tmux >/dev/null; then
+  FISH_BIN=$(command -v fish || true)
+  put "$C/realhax/tmux.conf" <<EOF
+# realhax tmux theme (sourced from ~/.tmux.conf)
+if-shell 'infocmp tmux-256color >/dev/null 2>&1' 'set -g default-terminal tmux-256color' 'set -g default-terminal screen-256color'
+set -as terminal-overrides ',xterm-256color:RGB,alacritty:RGB'
+${FISH_BIN:+set -g default-shell $FISH_BIN}
+set -g mouse on
+set -g history-limit 50000
+set -g base-index 1
+setw -g pane-base-index 1
+set -g renumber-windows on
+set -g escape-time 10
+set -g status-interval 15
+set -g status-position bottom
+set -g status-justify left
+set -g status-style 'bg=$BG,fg=$FG'
+set -g status-left-length 40
+set -g status-left '#[bg=$RED,fg=$BG,bold] @@F489@@ #S #[bg=$BG,fg=$RED]@@E0B0@@ '
+set -g status-right-length 60
+set -g status-right '#[fg=$BLUE]@@E0B2@@#[bg=$BLUE,fg=#ffffff] %a %b %d  %H:%M #[bg=$BLUE,fg=$RED]@@E0B2@@#[bg=$RED,fg=$BG,bold] #h '
+setw -g window-status-separator ''
+setw -g window-status-format '#[fg=#7a8394] #I #W '
+setw -g window-status-current-format '#[bg=$BLUE,fg=$BG]@@E0B0@@#[bg=$BLUE,fg=#ffffff,bold] #I #W #[bg=$BG,fg=$BLUE]@@E0B0@@'
+setw -g window-status-activity-style 'fg=#f5a524'
+set -g pane-border-style 'fg=#3a3f48'
+set -g pane-active-border-style 'fg=$RED'
+set -g display-panes-active-colour '$RED'
+set -g display-panes-colour '#3a3f48'
+set -g message-style 'bg=$RED,fg=$BG,bold'
+set -g message-command-style 'bg=$BLUE,fg=#ffffff'
+setw -g mode-style 'bg=#5a1420,fg=#ffffff'
+setw -g clock-mode-colour '$RED'
+EOF
+  TMUXCONF="$HOME/.tmux.conf"
+  { [[ -f $TMUXCONF ]] && sed '/^# >>> realhax >>>$/,/^# <<< realhax <<<$/d' "$TMUXCONF"
+    echo '# >>> realhax >>>'
+    echo "source-file -q \"$C/realhax/tmux.conf\""
+    echo '# <<< realhax <<<'
+  } > "$TMP/tmux.conf"
+  put "$TMUXCONF" < "$TMP/tmux.conf"
+  # a tmux server that's already running keeps its old look until it re-reads
+  tmux source-file "$TMUXCONF" >/dev/null 2>&1 || true
+else
+  warn "tmux not installed — skipping the tmux theme"
+fi
 
 # --------------------------------------------------------------------------- 14. fastfetch card
 # Logo: the hex badge + "realhax.io" wordmark as 24-bit ANSI block art (36x18
